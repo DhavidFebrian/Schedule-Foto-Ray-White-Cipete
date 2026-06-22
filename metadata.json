@@ -1,0 +1,6 @@
+{
+  "name": "SFRD",
+  "description": "Aplikasi sinkronisasi jadwal foto dengan Google Sheets",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
