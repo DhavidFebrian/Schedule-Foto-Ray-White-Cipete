@@ -18,6 +18,31 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 
+data class AgentInfo(
+    val name: String = "",
+    val phone: String = "",
+    val waUrl: String = ""
+)
+
+fun getAgentPhoneByName(meName: String): String {
+    val clean = meName.trim().lowercase()
+    return when {
+        clean.contains("dhavit") || clean.contains("dhavid") || clean.contains("david") || clean.contains("valentino") -> "08561103735"
+        clean.contains("syafruddin") || clean.contains("sfrd") || clean.contains("syafru") || clean.contains("udin") -> "08129525287"
+        clean.contains("raffa") || clean.contains("rafa") -> "08561103735"
+        clean.contains("yudhi") || clean.contains("yudi") -> "0811988978"
+        clean.contains("herry") || clean.contains("heri") -> "0811800100"
+        clean.contains("yusri") -> "08121088711"
+        clean.contains("tika") -> "08128765432"
+        clean.contains("siti") -> "081234567890"
+        clean.contains("dewi") -> "081388881234"
+        clean.contains("sari") -> "08129876543"
+        clean.contains("indah") -> "08151234567"
+        clean.contains("budi") -> "08128456789"
+        else -> ""
+    }
+}
+
 class ScheduleViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
@@ -59,6 +84,9 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
     var formStatus = MutableStateFlow("Pending")
     var editingSchedule = MutableStateFlow<Schedule?>(null)
 
+    // Current category tab state shared between MainActivity and Dashboard
+    var selectedCategory = MutableStateFlow(ScheduleCategory.AKTIF)
+
     // Filter controls state
     var searchQuery = MutableStateFlow("")
     var filterStaff = MutableStateFlow("Semua")
@@ -73,10 +101,18 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
     private val _listingImagesMap = MutableStateFlow<Map<String, String>>(emptyMap())
     val listingImagesMap: StateFlow<Map<String, String>> = _listingImagesMap.asStateFlow()
 
-    fun fetchListingImageIfNeeded(idListing: String) {
+    // Cache for scraper all image URLs (Gallery): idListing -> List of image URLs
+    private val _listingImagesGalleryMap = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    val listingImagesGalleryMap: StateFlow<Map<String, List<String>>> = _listingImagesGalleryMap.asStateFlow()
+
+    // Cache for scraped Agent/ME Contact Info: idListing -> AgentInfo
+    private val _agentInfoMap = MutableStateFlow<Map<String, AgentInfo>>(emptyMap())
+    val agentInfoMap: StateFlow<Map<String, AgentInfo>> = _agentInfoMap.asStateFlow()
+
+    fun fetchListingImageIfNeeded(idListing: String, defaultMeName: String = "") {
         val cleanId = idListing.trim()
         if (cleanId.isBlank()) return
-        if (_listingImagesMap.value.containsKey(cleanId)) return
+        if (_listingImagesMap.value.containsKey(cleanId) && _listingImagesGalleryMap.value.containsKey(cleanId)) return
 
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val url = "https://raywhitecipete.net/ListingView/Detail/$cleanId"
@@ -92,58 +128,133 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                 client.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
                         val html = response.body?.string() ?: ""
+                        
+                        // Parse Images
                         val imgRegex = """<img[^>]+src=["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE)
                         val matches = imgRegex.findAll(html)
                         
-                        // Gather all valid image sources
                         val candidateUrls = matches.map { it.groupValues[1] }.toList()
-                        var foundUrl: String? = null
+                        val allImages = mutableListOf<String>()
                         
-                        // Strategy 1: Prioritize explicit property gallery images (usually located under uploads, property, or listings categories)
+                        // Pick out all valid property gallery/upload images
                         for (src in candidateUrls) {
                             val lower = src.lowercase()
-                            if ((lower.contains("upload") || lower.contains("listing") || lower.contains("property") || lower.contains("media") || lower.contains("images")) &&
-                                (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png")) &&
-                                !lower.contains("logo") && !lower.contains("icon") && !lower.contains("avatar") && !lower.contains("marker") && !lower.contains("raywhite")) {
-                                foundUrl = if (src.startsWith("/")) {
+                            if (!lower.contains("logo") &&
+                                !lower.contains("icon") &&
+                                !lower.contains("avatar") &&
+                                !lower.contains("marker") &&
+                                !lower.contains("theme") &&
+                                !lower.contains("banner") &&
+                                !lower.contains("assets") &&
+                                !lower.contains("raywhite") &&
+                                !lower.contains("social") &&
+                                !lower.endsWith(".svg") &&
+                                (src.startsWith("http") || src.startsWith("/"))) {
+                                
+                                val fullUrl = if (src.startsWith("/")) {
                                     "https://raywhitecipete.net" + src
                                 } else {
                                     src
                                 }
-                                break
-                            }
-                        }
-                        
-                        // Strategy 2: Graceful fallback filtering out all typical UI assets/logos/vectors
-                        if (foundUrl == null) {
-                            for (src in candidateUrls) {
-                                val lower = src.lowercase()
-                                if (!lower.contains("logo") &&
-                                    !lower.contains("icon") &&
-                                    !lower.contains("avatar") &&
-                                    !lower.contains("marker") &&
-                                    !lower.contains("theme") &&
-                                    !lower.contains("banner") &&
-                                    !lower.contains("assets") &&
-                                    !lower.contains("raywhite") &&
-                                    !lower.contains("social") &&
-                                    !lower.endsWith(".svg") &&
-                                    (src.startsWith("http") || src.startsWith("/"))) {
-                                    
-                                    foundUrl = if (src.startsWith("/")) {
-                                        "https://raywhitecipete.net" + src
-                                    } else {
-                                        src
-                                    }
-                                    break
+                                if (!allImages.contains(fullUrl)) {
+                                    allImages.add(fullUrl)
                                 }
                             }
                         }
                         
-                        if (foundUrl != null) {
-                            _listingImagesMap.update { current ->
-                                current + (cleanId to foundUrl)
+                        // Parse WhatsApp / Agent Info
+                        val waRegex = """(?:https?:)?//(?:api\.whatsapp\.com/send|wa\.me)/?[^\s"'>]*|whatsapp://[^\s"'>]*""".toRegex(RegexOption.IGNORE_CASE)
+                        val waMatches = waRegex.findAll(html).map { it.value }.toList()
+                        
+                        var finalAgentName = defaultMeName.trim()
+                        var finalAgentPhone = getAgentPhoneByName(defaultMeName)
+                        var finalWaUrl = ""
+                        
+                        for (waUrl in waMatches) {
+                            val decoded = try { java.net.URLDecoder.decode(waUrl, "UTF-8") } catch(e: Exception) { waUrl }
+                            
+                            // Extract phone
+                            var phone = ""
+                            val phoneMatch = """phone=([+\d]+)""".toRegex().find(waUrl)
+                            if (phoneMatch != null) {
+                                phone = phoneMatch.groupValues[1]
+                            } else {
+                                val waMeMatch = """wa\.me/([+\d]+)""".toRegex().find(waUrl)
+                                if (waMeMatch != null) {
+                                    phone = waMeMatch.groupValues[1]
+                                }
                             }
+                            
+                            if (phone.isBlank()) {
+                                val numMatch = """08\d{8,11}""".toRegex().find(decoded)
+                                if (numMatch != null) {
+                                    phone = numMatch.value
+                                }
+                            }
+                            
+                            // Extract Name
+                            var name = ""
+                            val hubungiMatch = """Hubungi:[ \n\r]*([A-Za-z ]+)[, \n\r]""".toRegex(RegexOption.IGNORE_CASE).find(decoded)
+                            if (hubungiMatch != null) {
+                                name = hubungiMatch.groupValues[1].trim()
+                            }
+                            
+                            if (phone.isNotBlank()) {
+                                finalAgentPhone = phone
+                                if (name.isNotBlank()) {
+                                    finalAgentName = name
+                                }
+                                finalWaUrl = waUrl
+                                break
+                            }
+                        }
+                        
+                        // Text heuristics search/fallback for phone and name if no explicit Wa link worked
+                        if (finalAgentPhone.isBlank()) {
+                            val phoneRegex = """(?:08|\+628|628)\d{1,4}[-.\s]?\d{3,4}[-.\s]?\d{3,4}""".toRegex()
+                            val match = phoneRegex.find(html)
+                            if (match != null) {
+                                finalAgentPhone = match.groupValues[0].replace("[-\\s\\+]".toRegex(), "")
+                                val startIdx = maxOf(0, match.range.first - 150)
+                                val context = html.substring(startIdx, match.range.first)
+                                val cleanContext = context.replace("<[^>]*>".toRegex(), " ")
+                                val nameMatch = """Hubungi\s*:\s*([A-Za-z\s]+)""".toRegex(RegexOption.IGNORE_CASE).find(cleanContext)
+                                if (nameMatch != null) {
+                                    finalAgentName = nameMatch.groupValues[1].trim()
+                                } else {
+                                    val words = cleanContext.trim().split("\\s+".toRegex())
+                                    if (words.isNotEmpty()) {
+                                        val potentialName = words.takeLast(4).filter { it.firstOrNull()?.isUpperCase() == true && it.length > 2 }.joinToString(" ")
+                                        if (potentialName.isNotBlank() && !potentialName.contains("Share", ignoreCase = true) && !potentialName.contains("Rp", ignoreCase = true)) {
+                                            finalAgentName = potentialName
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // If phone number is still empty, let's fall back to our local directory from name
+                        if (finalAgentPhone.isBlank() && finalAgentName.isNotBlank()) {
+                            finalAgentPhone = getAgentPhoneByName(finalAgentName)
+                        }
+                        
+                        // Update cache with results
+                        if (allImages.isNotEmpty()) {
+                            _listingImagesMap.update { current ->
+                                current + (cleanId to allImages.first())
+                            }
+                            _listingImagesGalleryMap.update { current ->
+                                current + (cleanId to allImages)
+                            }
+                        }
+                        
+                        val agentInfo = AgentInfo(
+                            name = finalAgentName,
+                            phone = finalAgentPhone,
+                            waUrl = finalWaUrl
+                        )
+                        _agentInfoMap.update { current ->
+                            current + (cleanId to agentInfo)
                         }
                     }
                 }
@@ -159,6 +270,15 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
 
     private val _submitStatus = MutableStateFlow<SubmitState>(SubmitState.Idle)
     val submitStatus: StateFlow<SubmitState> = _submitStatus.asStateFlow()
+
+    data class AppUpdate(
+        val version: String = "",
+        val downloadUrl: String = "",
+        val changelog: String = ""
+    )
+
+    private val _appUpdateState = MutableStateFlow<AppUpdate?>(null)
+    val appUpdateState: StateFlow<AppUpdate?> = _appUpdateState.asStateFlow()
 
     // Database entries
     val allSchedules: StateFlow<List<Schedule>> = repository.allSchedules
@@ -221,7 +341,59 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+        
+        // Listen to DB for VERSION_CHECK and update version status
+        viewModelScope.launch {
+            repository.allSchedules.collect { list ->
+                val verItem = list.find { it.idListing.trim() == "VERSION_CHECK" }
+                if (verItem != null) {
+                    val serverVer = verItem.namaMe.trim()
+                    if (isNewerVersion(serverVer, "1.3")) {
+                        _appUpdateState.value = AppUpdate(
+                            version = serverVer,
+                            downloadUrl = verItem.lokasi,
+                            changelog = verItem.staff
+                        )
+                    } else {
+                        _appUpdateState.value = null
+                    }
+                } else {
+                    _appUpdateState.value = null
+                }
+            }
+        }
         resetForm()
+    }
+
+    fun isNewerVersion(server: String, current: String): Boolean {
+        return try {
+            val serverParts = server.trim().lowercase().removePrefix("v").split(".").mapNotNull { it.toIntOrNull() }
+            val currentParts = current.trim().lowercase().removePrefix("v").split(".").mapNotNull { it.toIntOrNull() }
+            for (i in 0 until maxOf(serverParts.size, currentParts.size)) {
+                val serverVal = serverParts.getOrElse(i) { 0 }
+                val currentVal = currentParts.getOrElse(i) { 0 }
+                if (serverVal > currentVal) return true
+                if (serverVal < currentVal) return false
+            }
+            false
+        } catch (e: Exception) {
+            server != current && server > current
+        }
+    }
+
+    fun updateScheduleDirectly(schedule: Schedule) {
+        viewModelScope.launch {
+            _syncStatus.value = SyncState.Loading
+            val original = schedule
+            val result = repository.updateSchedule(schedule, original)
+            result.onSuccess {
+                _syncStatus.value = SyncState.Success("Jadwal Berhasil Diperbarui!")
+                syncDataSilently()
+            }.onFailure { err ->
+                _syncStatus.value = SyncState.Error("Simpan Lokal Sukses (Sheets tertunda: ${err.message})")
+                syncDataSilently()
+            }
+        }
     }
 
     fun resetForm() {
@@ -434,4 +606,11 @@ sealed interface SubmitState {
     object Loading : SubmitState
     object Success : SubmitState
     data class Error(val message: String) : SubmitState
+}
+
+enum class ScheduleCategory(val displayName: String) {
+    SEMUA("Semua"),
+    AKTIF("Jadwal Aktif"),
+    SELESAI("Jadwal Selesai"),
+    TASK("Task")
 }

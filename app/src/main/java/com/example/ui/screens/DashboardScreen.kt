@@ -1,6 +1,12 @@
 package com.example.ui.screens
 
 import android.app.DatePickerDialog
+import android.content.Intent
+import android.net.Uri
+import com.example.ui.AgentInfo
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.animation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -21,6 +27,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -36,15 +43,43 @@ import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import coil.compose.AsyncImage
 import com.example.data.Schedule
 import com.example.ui.ScheduleViewModel
+import com.example.ui.getAgentPhoneByName
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.Velocity
 import com.example.ui.SyncState
 import java.text.SimpleDateFormat
 import java.util.*
 
-enum class ScheduleCategory(val displayName: String) {
-    SEMUA("Semua"),
-    AKTIF("Jadwal Aktif"),
-    SELESAI("Jadwal Selesai"),
-    TASK("Task")
+import com.example.ui.ScheduleCategory
+
+fun formatIndonesianDate(rawDate: String): String {
+    return try {
+        val parser = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val output = SimpleDateFormat("EEEE, d MMMM yyyy", Locale("id", "ID"))
+        parser.parse(rawDate.trim())?.let { output.format(it) } ?: rawDate
+    } catch (e: Exception) {
+        rawDate
+    }
+}
+
+fun formatTwelveHourTime(rawTime: String): String {
+    return try {
+        val parser = SimpleDateFormat("HH:mm", Locale.getDefault())
+        val output = SimpleDateFormat("hh:mm a", Locale.US)
+        parser.parse(rawTime.trim())?.let { output.format(it).uppercase() } ?: rawTime
+    } catch (e: Exception) {
+        try {
+            val parser = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+            val output = SimpleDateFormat("hh:mm a", Locale.US)
+            parser.parse(rawTime.trim())?.let { output.format(it).uppercase() } ?: rawTime
+        } catch (e2: Exception) {
+            rawTime
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -52,6 +87,7 @@ enum class ScheduleCategory(val displayName: String) {
 fun DashboardScreen(
     viewModel: ScheduleViewModel,
     onNavigateToForm: () -> Unit,
+    onOpenDrawer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val schedules by viewModel.filteredSchedules.collectAsStateWithLifecycle()
@@ -64,9 +100,12 @@ fun DashboardScreen(
     val filterEndDate by viewModel.filterEndDate.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val listingImagesMap by viewModel.listingImagesMap.collectAsStateWithLifecycle()
+    val listingImagesGalleryMap by viewModel.listingImagesGalleryMap.collectAsStateWithLifecycle()
+    val agentInfoMap by viewModel.agentInfoMap.collectAsStateWithLifecycle()
 
-    var selectedCategory by remember { mutableStateOf(ScheduleCategory.AKTIF) }
+    val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     var selectedScheduleForDetail by remember { mutableStateOf<Schedule?>(null) }
+    var selectedScheduleForFollowUp by remember { mutableStateOf<Schedule?>(null) }
     var showCalendarView by remember { mutableStateOf(false) }
     var selectedCalendarDate by remember { mutableStateOf<String?>(
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -121,9 +160,14 @@ fun DashboardScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
+                navigationIcon = {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu")
+                    }
+                },
                 title = {
-                    Column {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = "SCHEDULE FOTO RWC",
                             style = MaterialTheme.typography.labelSmall.copy(
@@ -140,16 +184,6 @@ fun DashboardScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { viewModel.syncData() },
-                        modifier = Modifier.testTag("refresh_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Sync Data",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
                     IconButton(
                         onClick = { viewModel.retryUnsyncedSchedules() },
                         modifier = Modifier.testTag("retry_sync_button")
@@ -183,12 +217,110 @@ fun DashboardScreen(
             )
         }
     ) { paddingValues ->
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        var swipeOffset by remember { mutableStateOf(0f) }
+        val nestedScrollConnection = remember(listState) {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    // Pulling up reduces swipeOffset first if it has visual drag offset
+                    if (available.y < 0 && swipeOffset > 0f) {
+                        val consumed = available.y.coerceAtLeast(-swipeOffset)
+                        swipeOffset += consumed
+                        return Offset(0f, consumed)
+                    }
+                    // Pulling down while already scrolled to the top of list: intercept immediately
+                    if (available.y > 0 && swipeOffset > 0f && listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) {
+                        if (swipeOffset < 300f) {
+                            swipeOffset = (swipeOffset + available.y * 0.4f).coerceAtMost(300f)
+                            return Offset(0f, available.y)
+                        }
+                    }
+                    return Offset.Zero
+                }
+
+                override fun onPostScroll(
+                    consumed: Offset,
+                    available: Offset,
+                    source: NestedScrollSource
+                ): Offset {
+                    // Pulling down more when LazyColumn is fully at the top but couldn't consume the drag
+                    if (available.y > 0 && listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) {
+                        swipeOffset = (swipeOffset + available.y * 0.4f).coerceAtMost(300f)
+                        return Offset(0f, available.y)
+                    }
+                    return Offset.Zero
+                }
+
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    if (swipeOffset > 150f) {
+                        viewModel.syncData()
+                    }
+                    swipeOffset = 0f
+                    return Velocity.Zero
+                }
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
                 .background(MaterialTheme.colorScheme.surface)
+                .nestedScroll(nestedScrollConnection)
         ) {
+            // Modern Pull-to-refresh Indicator Banner overlayed at the top
+            AnimatedVisibility(
+                visible = swipeOffset > 20f || syncStatus is SyncState.Loading,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .zIndex(10f)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    shadowElevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (syncStatus is SyncState.Loading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Menghubungkan ke Google Sheets...",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (swipeOffset > 150f) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (swipeOffset > 150f) "Lepaskan untuk sinkronisasi" else "Tarik ke bawah untuk menyegarkan",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -362,6 +494,7 @@ fun DashboardScreen(
 
                 if (!showCalendarView) {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier
                             .fillMaxSize()
                             .weight(1f)
@@ -381,7 +514,7 @@ fun DashboardScreen(
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(105.dp)
-                                        .clickable { selectedCategory = ScheduleCategory.SEMUA },
+                                        .clickable { viewModel.selectedCategory.value = ScheduleCategory.SEMUA },
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
                                     ),
@@ -435,7 +568,7 @@ fun DashboardScreen(
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(105.dp)
-                                        .clickable { selectedCategory = ScheduleCategory.AKTIF },
+                                        .clickable { viewModel.selectedCategory.value = ScheduleCategory.AKTIF },
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.25f)
                                     ),
@@ -490,7 +623,7 @@ fun DashboardScreen(
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(105.dp)
-                                        .clickable { selectedCategory = ScheduleCategory.TASK },
+                                        .clickable { viewModel.selectedCategory.value = ScheduleCategory.TASK },
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.25f)
                                     ),
@@ -536,6 +669,8 @@ fun DashboardScreen(
                                 }
                             }
                         }
+
+
 
                         // B. Search & Filter Row - Item 2 of LazyColumn
                         item {
@@ -775,7 +910,7 @@ fun DashboardScreen(
                                             }
                                             Tab(
                                                 selected = isSelected,
-                                                onClick = { selectedCategory = category },
+                                                onClick = { viewModel.selectedCategory.value = category },
                                                 text = {
                                                     Text(
                                                         text = "${category.displayName} ($categoryCount)",
@@ -873,7 +1008,14 @@ fun DashboardScreen(
                                 ScheduleRowItem(
                                     schedule = schedule,
                                     listingImagesMap = listingImagesMap,
-                                    onFetchImage = { viewModel.fetchListingImageIfNeeded(it) },
+                                    onFetchImage = { id -> viewModel.fetchListingImageIfNeeded(id, schedule.namaMe) },
+                                    onEditClick = {
+                                        viewModel.startEditing(schedule)
+                                        onNavigateToForm()
+                                    },
+                                    onFollowUpClick = {
+                                        selectedScheduleForFollowUp = schedule
+                                    },
                                     onClick = { selectedScheduleForDetail = schedule }
                                 )
                             }
@@ -978,7 +1120,14 @@ fun DashboardScreen(
                                     ScheduleRowItem(
                                         schedule = schedule,
                                         listingImagesMap = listingImagesMap,
-                                        onFetchImage = { viewModel.fetchListingImageIfNeeded(it) },
+                                        onFetchImage = { id -> viewModel.fetchListingImageIfNeeded(id, schedule.namaMe) },
+                                        onEditClick = {
+                                            viewModel.startEditing(schedule)
+                                            onNavigateToForm()
+                                        },
+                                        onFollowUpClick = {
+                                            selectedScheduleForFollowUp = schedule
+                                        },
                                         onClick = { selectedScheduleForDetail = schedule }
                                     )
                                 }
@@ -995,6 +1144,8 @@ fun DashboardScreen(
             ScheduleDetailDialog(
                 schedule = schedule,
                 listingImagesMap = listingImagesMap,
+                listingImagesGalleryMap = listingImagesGalleryMap,
+                agentInfoMap = agentInfoMap,
                 onDismiss = { selectedScheduleForDetail = null },
                 onDelete = {
                     viewModel.deleteSchedule(schedule)
@@ -1007,6 +1158,14 @@ fun DashboardScreen(
                 }
             )
         }
+
+        selectedScheduleForFollowUp?.let { schedule ->
+            WhatsAppChooserDialog(
+                schedule = schedule,
+                agentInfoMap = agentInfoMap,
+                onDismiss = { selectedScheduleForFollowUp = null }
+            )
+        }
     }
 }
 
@@ -1015,14 +1174,16 @@ fun ScheduleRowItem(
     schedule: Schedule,
     listingImagesMap: Map<String, String>,
     onFetchImage: (String) -> Unit,
+    onEditClick: () -> Unit,
+    onFollowUpClick: () -> Unit,
     onClick: () -> Unit
 ) {
     val typeLower = schedule.type.lowercase().trim()
     val isSelesai = typeLower.startsWith("done")
     val isAktif = !isSelesai && typeLower.isNotBlank() && schedule.tanggal.trim().isNotBlank()
     val indicatorColor = when {
-        isSelesai -> MaterialTheme.colorScheme.primary // Amber Gold / Secondary
-        isAktif -> MaterialTheme.colorScheme.secondary // Cosmic Indigo Accent
+        isSelesai -> MaterialTheme.colorScheme.primary
+        isAktif -> MaterialTheme.colorScheme.secondary
         else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
     }
 
@@ -1036,332 +1197,335 @@ fun ScheduleRowItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .testTag("schedule_item_${schedule.id}"),
+            .testTag("schedule_item_${schedule.id}")
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(
-            containerColor = indicatorColor.copy(alpha = 0.06f)
+            containerColor = indicatorColor.copy(alpha = 0.05f)
         ),
         border = BorderStroke(1.dp, indicatorColor.copy(alpha = 0.15f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(16.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(IntrinsicSize.Min),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Distinctive visual color indicator bar
-            Box(
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
                 modifier = Modifier
-                    .width(6.dp)
-                    .fillMaxHeight()
-                    .background(indicatorColor)
-            )
-
-            // Real-time property image display (Thumbnail di kiri)
-            val cleanId = schedule.idListing.trim()
-            if (cleanId.isNotBlank()) {
-                val imageUrl = listingImagesMap[cleanId]
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Distinctive visual color indicator bar
                 Box(
                     modifier = Modifier
-                        .padding(start = 12.dp, top = 12.dp, bottom = 12.dp)
-                        .size(76.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                        .width(6.dp)
+                        .fillMaxHeight()
+                        .background(indicatorColor)
+                )
+
+                // Large property image display on the left (matches height perfectly!)
+                val cleanId = schedule.idListing.trim()
+                if (cleanId.isNotBlank()) {
+                    val imageUrl = listingImagesMap[cleanId]
+                    Box(
+                        modifier = Modifier
+                            .width(115.dp)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (imageUrl != null) {
+                            AsyncImage(
+                                model = imageUrl,
+                                contentDescription = "Foto Listing $cleanId",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = indicatorColor.copy(alpha = 0.5f)
+                            )
+                        }
+                    }
+                } else {
+                    // Manual Input / No Listing ID image placeholder
+                    Box(
+                        modifier = Modifier
+                            .width(115.dp)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Image,
+                            contentDescription = "No Image",
+                            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
+
+                // Text Content on the Right side (shifted slightly to the right with start spacing)
+                Column(
+                    modifier = Modifier
+                        .weight(1.0f)
+                        .padding(start = 16.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)
+                ) {
+                    // Listing ID label & Sync Tag row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (schedule.idListing.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Text(
+                                        text = schedule.idListing,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Manual Input",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+
+                        // Sync indicators
+                        val isSynced = schedule.synced
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (isSynced) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                    else MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                                    RoundedCornerShape(100.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Icon(
+                                    imageVector = if (isSynced) Icons.Default.CloudDone else Icons.Default.CloudOff,
+                                    contentDescription = null,
+                                    tint = if (isSynced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Text(
+                                    text = if (isSynced) "Synced" else "Pending",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                    color = if (isSynced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Location / Jalan details
+                    val displayLocation = schedule.lokasi.ifBlank { "Lokasi tidak tersedia" }
+                    Text(
+                        text = displayLocation,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // ME row
+                    val displayName = schedule.namaMe.ifBlank { "ME tidak diketahui" }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "ME Name Icon",
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "ME: $displayName",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Date & Time row (formatted with Day of week and 12H AM/PM)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.CalendarToday, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(14.dp))
+                            Text(formatIndonesianDate(schedule.tanggal), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.AccessTime, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(14.dp))
+                            Text(formatTwelveHourTime(schedule.jam), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Type Badge & Status Badge row beside staff chip
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val isDoneType = schedule.type.lowercase().contains("done")
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (isDoneType) MaterialTheme.colorScheme.secondaryContainer 
+                                        else MaterialTheme.colorScheme.tertiaryContainer, 
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Type: ${schedule.type}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+                                    color = if (isDoneType) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                            }
+
+                            val isDoneStatus = schedule.status.uppercase().trim() == "DONE"
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (isDoneStatus) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surfaceVariant, 
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Status: ${schedule.status}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+                                    color = if (isDoneStatus) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // Staff Label
+                        Box(
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = schedule.staff,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Divider separating details and direct columns actions (Edit & Follow Up)
+            HorizontalDivider(
+                color = indicatorColor.copy(alpha = 0.12f),
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+
+            // Split Action Columns row: Edit vs Follow Up! (Highly requested feature)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Column 1: Edit button
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { onEditClick() },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (imageUrl != null) {
-                        AsyncImage(
-                            model = imageUrl,
-                            contentDescription = "Foto Listing $cleanId",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                        )
-                    } else {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = indicatorColor.copy(alpha = 0.5f)
-                        )
-                    }
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .weight(1.0f)
-                    .padding(16.dp)
-            ) {
-                // Row components: metadata and sync tags
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
-                ) {
-                // Listing ID label
-                if (schedule.idListing.isNotBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
-                            Text(
-                                text = schedule.idListing,
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
                         Text(
-                            text = "Manual Input",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.secondary
+                            text = "Edit Jadwal",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
 
-                // Sync Tag
-                if (schedule.synced) {
-                    Box(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 10.dp, vertical = 2.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(
-                                imageVector = Icons.Default.CloudDone,
-                                contentDescription = "Synced",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = "Synced",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 10.dp, vertical = 2.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(
-                                imageVector = Icons.Default.CloudOff,
-                                contentDescription = "Pending Sync",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = "Pending",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.error,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // ME details / Location details
-            val displayName = schedule.namaMe.ifBlank { "Autofilling..." }
-            val displayLocation = schedule.lokasi.ifBlank { "Lokasi akan diautofill oleh Maps/Sheets..." }
-
-            Text(
-                text = displayLocation,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = "ME Name Icon",
-                    tint = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "ME: $displayName",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Type & Status indicators row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Type label/badge
-                val isDoneType = schedule.type.lowercase().contains("done")
+                // Vertical Divider
                 Box(
                     modifier = Modifier
-                        .background(
-                            if (isDoneType) MaterialTheme.colorScheme.secondaryContainer 
-                            else MaterialTheme.colorScheme.tertiaryContainer, 
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Category,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = if (isDoneType) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Text(
-                            text = "Type: ${schedule.type.ifBlank { "Foto" }}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = if (isDoneType) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
-                }
+                        .width(1.dp)
+                        .fillMaxHeight(0.6f)
+                        .background(indicatorColor.copy(alpha = 0.15f))
+                )
 
-                // Status label/badge
-                val isDoneStatus = schedule.status.uppercase().trim() == "DONE"
+                // Column 2: Follow Up button
                 Box(
                     modifier = Modifier
-                        .background(
-                            if (isDoneStatus) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant, 
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Icon(
-                            imageVector = if (isDoneStatus) Icons.Default.CheckCircle else Icons.Default.Info,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = if (isDoneStatus) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Status: ${schedule.status.ifBlank { "Pending" }}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = if (isDoneStatus) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Date, time and staff
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Target Date Time
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { onFollowUpClick() },
+                    contentAlignment = Alignment.Center
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.CalendarToday,
-                            contentDescription = "Date icon",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        // Make date look friendlier
-                        val formattedDate = try {
-                            val parser = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-                            val output = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
-                            parser.parse(schedule.tanggal)?.let { output.format(it) } ?: schedule.tanggal
-                        } catch (e: Exception) {
-                            schedule.tanggal
-                        }
-                        Text(
-                            text = formattedDate,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AccessTime,
-                            contentDescription = "Time icon",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
+                            imageVector = Icons.Default.Message,
+                            contentDescription = "WhatsApp",
+                            tint = Color(0xFF25D366),
+                            modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = schedule.jam,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = "Follow Up ME",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color(0xFF1E7E34)
                         )
                     }
-                }
-
-                // Staff chip
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsRun,
-                        contentDescription = "Staff",
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Text(
-                        text = schedule.staff,
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
                 }
             }
-
-
         }
     }
-}
 }
 
 @Composable
 fun ScheduleDetailDialog(
     schedule: Schedule,
     listingImagesMap: Map<String, String>,
+    listingImagesGalleryMap: Map<String, List<String>>,
+    agentInfoMap: Map<String, AgentInfo>,
     onDismiss: () -> Unit,
     onDelete: () -> Unit,
     onEdit: () -> Unit
@@ -1430,23 +1594,42 @@ fun ScheduleDetailDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Real-time photo banner
+                // Horizontal scroll gallery of all available property images
                 val cleanId = schedule.idListing.trim()
                 if (cleanId.isNotBlank()) {
-                    val imageUrl = listingImagesMap[cleanId]
-                    if (imageUrl != null) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(160.dp),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            AsyncImage(
-                                model = imageUrl,
-                                contentDescription = "Foto Listing $cleanId",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    val galleryList = listingImagesGalleryMap[cleanId] ?: emptyList()
+                    val fallbackImg = listingImagesMap[cleanId]
+                    val imagesToDisplay = if (galleryList.isNotEmpty()) galleryList else listOfNotNull(fallbackImg)
+                    
+                    if (imagesToDisplay.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Foto Listing (Total ${imagesToDisplay.size} foto - slide ke kanan/kiri)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
                             )
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(imagesToDisplay) { img ->
+                                    Card(
+                                        modifier = Modifier
+                                            .width(220.dp)
+                                            .height(150.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                    ) {
+                                        AsyncImage(
+                                            model = img,
+                                            contentDescription = "Foto Listing $cleanId",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1504,6 +1687,101 @@ fun ScheduleDetailDialog(
                     }
                 }
 
+                // Follow Up WhatsApp Container (PROACTIVE FOLLOW-UP DASHBOARD AS REQUESTED)
+                val agentInfo = agentInfoMap[cleanId]
+                val testMeName = agentInfo?.name?.ifBlank { schedule.namaMe } ?: schedule.namaMe
+                val rawPhone = agentInfo?.phone?.ifBlank { "" } ?: ""
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Phone,
+                                contentDescription = "Follow Up",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Follow Up ME (Marketing Executive)",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        
+                        Text(
+                            text = "ME Name: $testMeName",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        
+                        if (rawPhone.isNotBlank()) {
+                            Text(
+                                text = "WhatsApp: $rawPhone",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Text(
+                                text = "No phone parsed automatically.",
+                                style = MaterialTheme.typography.bodySmall.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+
+                        val context = LocalContext.current
+                        Button(
+                            onClick = {
+                                val targetName = testMeName.ifBlank { "ME" }
+                                val formattedPhone = if (rawPhone.isNotBlank()) {
+                                    var clean = rawPhone.replace("[^\\d]".toRegex(), "")
+                                    if (clean.startsWith("0")) {
+                                        clean = "62" + clean.substring(1)
+                                    }
+                                    clean
+                                } else "628561103735" // Robust safe default if no phone is scraped
+
+                                val javaCalendar = Calendar.getInstance()
+                                val hour = javaCalendar.get(Calendar.HOUR_OF_DAY)
+                                val greeting = when (hour) {
+                                    in 4..10 -> "Selamat Pagi"
+                                    in 11..14 -> "Selamat Siang"
+                                    in 15..18 -> "Selamat Sore"
+                                    else -> "Selamat Malam"
+                                }
+                                
+                                val lowerName = targetName.lowercase()
+                                val femaleKeywords = listOf("sri", "siti", "dewi", "putri", "fitri", "indah", "ibu", "bu ", "maria", "ani ", "diana", "rani", "lia", "eka", "linda", "kartika", "nur", "sarah")
+                                val honorific = if (femaleKeywords.any { lowerName.contains(it) }) "Bu" else "Pak"
+                                
+                                val listingUrl = "https://raywhitecipete.net/ListingView/Detail/${schedule.idListing.trim()}"
+                                val testMsg = "$listingUrl\n\n$greeting $honorific $targetName,\nUntuk ID Listing ${schedule.idListing.trim()} berikut bisa kita ambil foto ulang kapan ya? agar kita bisa input ke dalam jadwal.\n\nTerima kasih."
+                                
+                                val intentUri = "https://api.whatsapp.com/send?phone=$formattedPhone&text=${Uri.encode(testMsg)}"
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(intentUri))
+                                context.startActivity(intent)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Hubungi via WhatsApp", color = Color.White)
+                        }
+                    }
+                }
+
                 // Lokasi
                 Column {
                     Text("Lokasi", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
@@ -1546,7 +1824,7 @@ fun ScheduleDetailDialog(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = schedule.tanggal,
+                                text = formatIndonesianDate(schedule.tanggal),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
                             )
                         }
@@ -1565,7 +1843,7 @@ fun ScheduleDetailDialog(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = schedule.jam,
+                                text = formatTwelveHourTime(schedule.jam),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
                             )
                         }
@@ -1871,8 +2149,8 @@ fun DashboardCalendarView(
                                         horizontalArrangement = Arrangement.spacedBy(2.5.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // Draw a dot for each schedule (up to 3) representing active vs completed events
-                                        daySchedules.take(3).forEach { schedule ->
+                                        // Draw a dot for each schedule representing active vs completed events
+                                        daySchedules.forEach { schedule ->
                                             val tLower = schedule.type.lowercase()
                                             val isDone = tLower.startsWith("done")
                                             val dotColor = when {
@@ -1896,4 +2174,357 @@ fun DashboardCalendarView(
             }
         }
     }
+}
+
+@Composable
+fun MonthlyAnalysisCard(schedules: List<Schedule>) {
+    val currentMonthName = SimpleDateFormat("MMMM yyyy", Locale("id", "ID")).format(Date())
+
+    val fotoCount = schedules.count { 
+        val t = it.type.lowercase()
+        t.contains("foto") || t.isBlank()
+    }
+    val videoCount = schedules.count { 
+        it.type.lowercase().contains("video")
+    }
+    val totalCount = fotoCount + videoCount
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+        ),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Ringkasan Analisis",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Statistik Listing ($currentMonthName)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(100.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "Total: $totalCount",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Box(
+                    modifier = Modifier.size(110.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val colorFoto = MaterialTheme.colorScheme.primary
+                    val colorVideo = MaterialTheme.colorScheme.secondary
+                    val colorEmpty = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val strokeWidthPx = 14.dp.toPx()
+                        val diameter = size.minDimension - strokeWidthPx
+                        val topLeftOffset = Offset(
+                            (size.width - diameter) / 2f,
+                            (size.height - diameter) / 2f
+                        )
+                        val arcSize = androidx.compose.ui.geometry.Size(diameter, diameter)
+
+                        if (totalCount == 0) {
+                            drawArc(
+                                color = colorEmpty,
+                                startAngle = 0f,
+                                sweepAngle = 360f,
+                                useCenter = false,
+                                topLeft = topLeftOffset,
+                                size = arcSize,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                    width = strokeWidthPx,
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                )
+                            )
+                        } else {
+                            val fotoAngle = (fotoCount.toFloat() / totalCount.toFloat()) * 360f
+                            val videoAngle = (videoCount.toFloat() / totalCount.toFloat()) * 360f
+
+                            drawArc(
+                                color = colorFoto,
+                                startAngle = -90f,
+                                sweepAngle = fotoAngle,
+                                useCenter = false,
+                                topLeft = topLeftOffset,
+                                size = arcSize,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                    width = strokeWidthPx,
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                )
+                            )
+
+                            drawArc(
+                                color = colorVideo,
+                                startAngle = -90f + fotoAngle,
+                                sweepAngle = videoAngle,
+                                useCenter = false,
+                                topLeft = topLeftOffset,
+                                size = arcSize,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                    width = strokeWidthPx,
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                )
+                            )
+                        }
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = if (totalCount > 0) "${((fotoCount.toFloat() / totalCount.toFloat()) * 100).toInt()}%" else "0%",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Foto",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ChartLegendRow(
+                        color = MaterialTheme.colorScheme.primary,
+                        label = "Foto Listing",
+                        value = "$fotoCount Media",
+                        percentage = if (totalCount > 0) "${((fotoCount.toFloat() / totalCount.toFloat()) * 100).toInt()}%" else "0%"
+                    )
+                    ChartLegendRow(
+                        color = MaterialTheme.colorScheme.secondary,
+                        label = "Video Listing",
+                        value = "$videoCount Media",
+                        percentage = if (totalCount > 0) "${((videoCount.toFloat() / totalCount.toFloat()) * 100).toInt()}%" else "0%"
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChartLegendRow(color: Color, label: String, value: String, percentage: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = percentage,
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Black),
+                    color = color
+                )
+            }
+            Text(
+                text = value,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun WhatsAppChooserDialog(
+    schedule: Schedule,
+    agentInfoMap: Map<String, AgentInfo>,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val agentInfo = agentInfoMap[schedule.idListing.trim()]
+    
+    var finalPhone = agentInfo?.phone?.trim() ?: ""
+    if (finalPhone.isBlank()) {
+        finalPhone = getAgentPhoneByName(schedule.namaMe)
+    }
+    
+    var cleanPhone = finalPhone.replace("[^\\d]".toRegex(), "")
+    if (cleanPhone.startsWith("0")) {
+        cleanPhone = "62" + cleanPhone.substring(1)
+    }
+    if (cleanPhone.isBlank()) {
+        cleanPhone = "085169671344"
+    }
+
+    val formattedDate = formatIndonesianDate(schedule.tanggal)
+    val formattedTime = formatTwelveHourTime(schedule.jam)
+
+    val message = """
+Halo ${schedule.namaMe.ifBlank { "ME Ray White" }}, saya dari Tim RWC Foto.
+
+Berikut info lengkap jadwal kegiatan untuk property Anda:
+📌 *ID Listing*: ${schedule.idListing.ifBlank { "(Manual Input)" }}
+🎬 *Tipe*: ${schedule.type}
+📅 *Jadwal*: $formattedDate pada $formattedTime
+📍 *Lokasi*: ${schedule.lokasi.ifBlank { "-" }}
+🏃 *Staff*: ${schedule.staff}
+⚡ *Status*: Pemotretan ${schedule.status}
+
+Detail lengkap properti website Ray White Cipete:
+🔗 https://raywhitecipete.net/ListingView/Detail/${schedule.idListing.trim()}
+
+Mohon ketersediaannya untuk follow up. Terima kasih.
+    """.trimIndent()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Message,
+                    contentDescription = null,
+                    tint = Color(0xFF25D366),
+                    modifier = Modifier.size(28.dp)
+                )
+                Text(
+                    text = "Follow Up WhatsApp",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Kirim detail jadwal follow-up ke ME ${schedule.namaMe.ifBlank { "" }} via WhatsApp.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.secondary)
+                            Text(
+                                text = "Penerima: ${schedule.namaMe} (${finalPhone.ifBlank { "085169671344 (Default)" }})",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = message,
+                            maxLines = 6,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Pilih jenis aplikasi WhatsApp yang ingin digunakan:",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        },
+        confirmButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        val uri = Uri.parse("https://api.whatsapp.com/send?phone=$cleanPhone&text=${Uri.encode(message)}")
+                        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                            setPackage("com.whatsapp")
+                        }
+                        try {
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            val fallbackIntent = Intent(Intent.ACTION_VIEW, uri)
+                            context.startActivity(fallbackIntent)
+                        }
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366), contentColor = Color.White)
+                ) {
+                    Text("WhatsApp", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                }
+
+                Button(
+                    onClick = {
+                        val uri = Uri.parse("https://api.whatsapp.com/send?phone=$cleanPhone&text=${Uri.encode(message)}")
+                        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                            setPackage("com.whatsapp.w4b")
+                        }
+                        try {
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            val fallbackIntent = Intent(Intent.ACTION_VIEW, uri)
+                            context.startActivity(fallbackIntent)
+                        }
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF075E54), contentColor = Color.White)
+                ) {
+                    Text("WA Business", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Batal")
+            }
+        }
+    )
 }
