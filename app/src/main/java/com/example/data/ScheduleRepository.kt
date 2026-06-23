@@ -4,6 +4,8 @@ import com.example.network.SheetSchedule
 import com.example.network.SheetsApiService
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
 class ScheduleRepository(
@@ -11,6 +13,7 @@ class ScheduleRepository(
     private val apiService: SheetsApiService,
     private val preferenceManager: PreferenceManager
 ) {
+    private val syncMutex = Mutex()
     val allSchedules: Flow<List<Schedule>> = scheduleDao.getAllSchedules()
 
     // Seeds beautiful mock data if database is totally empty, so they see a gorgeous dashboard on first launch
@@ -22,7 +25,7 @@ class ScheduleRepository(
     }
 
     // Sync from Google Sheets API with robust filtering and backward compatibility
-    suspend fun syncFromGoogleSheets(): Result<Unit> {
+    suspend fun syncFromGoogleSheets(): Result<Unit> = syncMutex.withLock {
         val url = preferenceManager.appsScriptUrl
         if (url.isBlank()) {
             return Result.failure(Exception("Apps Script URL belum dikonfigurasi. Silakan atur di Pengaturan."))
@@ -85,7 +88,7 @@ class ScheduleRepository(
     }
 
     // Insert schedule (saves locally, then attempts remote sync if configured)
-    suspend fun addSchedule(schedule: Schedule): Result<Unit> {
+    suspend fun addSchedule(schedule: Schedule): Result<Unit> = syncMutex.withLock {
         // 1. Insert local first for instant UI response
         val insertedId = scheduleDao.insertSchedule(schedule)
         val insertedSchedule = schedule.copy(id = insertedId.toInt())
@@ -123,7 +126,7 @@ class ScheduleRepository(
     }
 
     // Update existing schedule locally and remotely on Google Sheets
-    suspend fun updateSchedule(schedule: Schedule, originalSchedule: Schedule): Result<Unit> {
+    suspend fun updateSchedule(schedule: Schedule, originalSchedule: Schedule): Result<Unit> = syncMutex.withLock {
         // 1. Update locally
         scheduleDao.updateSchedule(schedule)
 
@@ -164,7 +167,7 @@ class ScheduleRepository(
     }
 
     // Resync pending schedules
-    suspend fun syncPendingSchedules(): Result<Int> {
+    suspend fun syncPendingSchedules(): Result<Int> = syncMutex.withLock {
         val url = preferenceManager.appsScriptUrl
         if (url.isBlank()) {
             return Result.failure(Exception("Apps Script URL belum diatur"))
@@ -208,7 +211,7 @@ class ScheduleRepository(
     }
 
     // Delete a specific schedule (locally and remotely if synced)
-    suspend fun deleteSchedule(schedule: Schedule): Result<Unit> {
+    suspend fun deleteSchedule(schedule: Schedule): Result<Unit> = syncMutex.withLock {
         // 1. Delete locally first
         scheduleDao.deleteSchedule(schedule)
 

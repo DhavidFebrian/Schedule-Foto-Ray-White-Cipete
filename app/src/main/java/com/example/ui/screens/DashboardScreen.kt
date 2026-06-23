@@ -202,19 +202,21 @@ fun DashboardScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = {
-                    viewModel.resetForm()
-                    onNavigateToForm()
-                },
-                icon = { Icon(Icons.Default.Add, contentDescription = "Tambah") },
-                text = { Text("Jadwal Baru") },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier
-                    .navigationBarsPadding()
-                    .testTag("add_schedule_fab")
-            )
+            if (selectedScheduleForDetail == null) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        viewModel.resetForm()
+                        onNavigateToForm()
+                    },
+                    icon = { Icon(Icons.Default.Add, contentDescription = "Tambah") },
+                    text = { Text("Jadwal Baru") },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier
+                        .navigationBarsPadding()
+                        .testTag("add_schedule_fab")
+                )
+            }
         }
     ) { paddingValues ->
         val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -1141,21 +1143,13 @@ fun DashboardScreen(
         }
         
         selectedScheduleForDetail?.let { schedule ->
-            ScheduleDetailDialog(
+            DetailPagerScreen(
                 schedule = schedule,
                 listingImagesMap = listingImagesMap,
                 listingImagesGalleryMap = listingImagesGalleryMap,
                 agentInfoMap = agentInfoMap,
-                onDismiss = { selectedScheduleForDetail = null },
-                onDelete = {
-                    viewModel.deleteSchedule(schedule)
-                    selectedScheduleForDetail = null
-                },
-                onEdit = {
-                    viewModel.startEditing(schedule)
-                    selectedScheduleForDetail = null
-                    onNavigateToForm()
-                }
+                viewModel = viewModel,
+                onDismiss = { selectedScheduleForDetail = null }
             )
         }
 
@@ -1347,31 +1341,60 @@ fun ScheduleRowItem(
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // ME row
+                    // ME and Staff details row side-by-side or stacked cleanly
                     val displayName = schedule.namaMe.ifBlank { "ME tidak diketahui" }
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = "ME Name Icon",
-                            tint = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "ME: $displayName",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "ME Name Icon",
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "ME: $displayName",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Staff Icon",
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Staff: ${schedule.staff}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
 
                     // Date & Time row (formatted with Day of week and 12H AM/PM)
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Default.CalendarToday, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(14.dp))
@@ -1385,58 +1408,47 @@ fun ScheduleRowItem(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Type Badge & Status Badge row beside staff chip
+                    // Type Badge & Status Badge row with plenty of room
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            val isDoneType = schedule.type.lowercase().contains("done")
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        if (isDoneType) MaterialTheme.colorScheme.secondaryContainer 
-                                        else MaterialTheme.colorScheme.tertiaryContainer, 
-                                        RoundedCornerShape(6.dp)
-                                    )
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "Type: ${schedule.type}",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
-                                    color = if (isDoneType) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
-                                )
-                            }
-
-                            val isDoneStatus = schedule.status.uppercase().trim() == "DONE"
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        if (isDoneStatus) MaterialTheme.colorScheme.primaryContainer
-                                        else MaterialTheme.colorScheme.surfaceVariant, 
-                                        RoundedCornerShape(6.dp)
-                                    )
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "Status: ${schedule.status}",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
-                                    color = if (isDoneStatus) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        // Staff Label
+                        val isDoneType = schedule.type.lowercase().contains("done")
                         Box(
                             modifier = Modifier
-                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .background(
+                                    if (isDoneType) MaterialTheme.colorScheme.secondaryContainer 
+                                    else MaterialTheme.colorScheme.tertiaryContainer, 
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = schedule.staff,
+                                text = "Tipe: ${schedule.type}",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                color = if (isDoneType) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        val isDoneStatus = schedule.status.uppercase().trim() == "DONE"
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (isDoneStatus) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant, 
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "Status: ${schedule.status}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+                                color = if (isDoneStatus) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -1690,7 +1702,7 @@ fun ScheduleDetailDialog(
                 // Follow Up WhatsApp Container (PROACTIVE FOLLOW-UP DASHBOARD AS REQUESTED)
                 val agentInfo = agentInfoMap[cleanId]
                 val testMeName = agentInfo?.name?.ifBlank { schedule.namaMe } ?: schedule.namaMe
-                val rawPhone = agentInfo?.phone?.ifBlank { "" } ?: ""
+                val rawPhone = getAgentPhoneByName(testMeName).ifBlank { getAgentPhoneByName(schedule.namaMe) }
                 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -2181,13 +2193,13 @@ fun MonthlyAnalysisCard(schedules: List<Schedule>) {
     val currentMonthName = SimpleDateFormat("MMMM yyyy", Locale("id", "ID")).format(Date())
 
     val fotoCount = schedules.count { 
-        val t = it.type.lowercase()
-        t.contains("foto") || t.isBlank()
+        val t = it.type.lowercase().trim()
+        t.contains("foto") || t.contains("drone") || t.isBlank()
     }
     val videoCount = schedules.count { 
         it.type.lowercase().contains("video")
     }
-    val totalCount = fotoCount + videoCount
+    val totalCount = schedules.size
 
     Card(
         modifier = Modifier
@@ -2378,6 +2390,16 @@ fun ChartLegendRow(color: Color, label: String, value: String, percentage: Strin
     }
 }
 
+fun getIndonesianTimeGreeting(): String {
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    return when (hour) {
+        in 4..10 -> "Pagi"
+        in 11..14 -> "Siang"
+        in 15..17 -> "Sore"
+        else -> "Malam"
+    }
+}
+
 @Composable
 fun WhatsAppChooserDialog(
     schedule: Schedule,
@@ -2386,11 +2408,8 @@ fun WhatsAppChooserDialog(
 ) {
     val context = LocalContext.current
     val agentInfo = agentInfoMap[schedule.idListing.trim()]
-    
-    var finalPhone = agentInfo?.phone?.trim() ?: ""
-    if (finalPhone.isBlank()) {
-        finalPhone = getAgentPhoneByName(schedule.namaMe)
-    }
+    val finalAgentName = agentInfo?.name?.ifBlank { schedule.namaMe } ?: schedule.namaMe
+    var finalPhone = getAgentPhoneByName(finalAgentName).ifBlank { getAgentPhoneByName(schedule.namaMe) }
     
     var cleanPhone = finalPhone.replace("[^\\d]".toRegex(), "")
     if (cleanPhone.startsWith("0")) {
@@ -2404,9 +2423,9 @@ fun WhatsAppChooserDialog(
     val formattedTime = formatTwelveHourTime(schedule.jam)
 
     val message = """
-Halo ${schedule.namaMe.ifBlank { "ME Ray White" }}, saya dari Tim RWC Foto.
+Halo Pak/Bu selamat ${getIndonesianTimeGreeting()}, saya dari Tim RWC Foto.
 
-Berikut info lengkap jadwal kegiatan untuk property Anda:
+Berikut info lengkap jadwal kegiatan untuk properti Anda:
 📌 *ID Listing*: ${schedule.idListing.ifBlank { "(Manual Input)" }}
 🎬 *Tipe*: ${schedule.type}
 📅 *Jadwal*: $formattedDate pada $formattedTime

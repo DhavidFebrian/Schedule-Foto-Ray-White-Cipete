@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.AssignmentTurnedIn
 import androidx.compose.material.icons.filled.CameraAlt
@@ -31,6 +32,7 @@ import com.example.ui.ScheduleViewModel
 @Composable
 fun AnalyticScreen(
     viewModel: ScheduleViewModel,
+    onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val schedules by viewModel.allSchedules.collectAsState()
@@ -39,8 +41,12 @@ fun AnalyticScreen(
     val activeSchedules = schedules.filter { it.idListing.trim() != "VERSION_CHECK" }
     
     val totalCount = activeSchedules.size
-    val doneCount = activeSchedules.count { it.status.uppercase() == "DONE" }
-    val pendingCount = activeSchedules.count { it.status.uppercase() == "PENDING" }
+    val doneCount = activeSchedules.count { 
+        val typeLower = it.type.lowercase().trim()
+        val statusLower = it.status.lowercase().trim()
+        typeLower.startsWith("done") || statusLower == "done" || statusLower == "selesai"
+    }
+    val pendingCount = totalCount - doneCount
     
     val fotoCount = activeSchedules.count { 
         val t = it.type.lowercase()
@@ -67,6 +73,14 @@ fun AnalyticScreen(
                             text = "Ringkasan Analisis",
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleLarge
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Kembali ke Dashboard"
                         )
                     }
                 },
@@ -183,7 +197,7 @@ fun AnalyticScreen(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                                Text("Foto Sesi", style = MaterialTheme.typography.labelMedium)
+                                Text("Sesi Foto", style = MaterialTheme.typography.labelMedium)
                             }
                             Text("$fotoCount", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                         }
@@ -205,7 +219,7 @@ fun AnalyticScreen(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
-                                Text("Video Sesi", style = MaterialTheme.typography.labelMedium)
+                                Text("Sesi Video", style = MaterialTheme.typography.labelMedium)
                             }
                             Text("$videoCount", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                         }
@@ -240,8 +254,20 @@ fun AnalyticScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     val staffCounts = activeSchedules
-                        .filter { it.staff.isNotBlank() }
-                        .groupBy { it.staff }
+                        .map { it.staff.trim() }
+                        .filter { staffName ->
+                            staffName.isNotBlank() &&
+                            !staffName.contains(",") &&
+                            !staffName.contains("/") &&
+                            !staffName.lowercase().contains("dan") &&
+                            staffName.lowercase() != "raffa, david" &&
+                            staffName.lowercase() != "david, raffa" &&
+                            staffName.lowercase() != "raffa,david" &&
+                            staffName.lowercase() != "david,raffa" &&
+                            staffName.lowercase() != "david & raffa" &&
+                            staffName.lowercase() != "raffa & david"
+                        }
+                        .groupBy { it }
                         .mapValues { it.value.size }
                         .toList()
                         .sortedByDescending { it.second }

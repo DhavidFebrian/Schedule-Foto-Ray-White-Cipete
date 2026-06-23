@@ -21,26 +21,106 @@ import java.util.concurrent.TimeUnit
 data class AgentInfo(
     val name: String = "",
     val phone: String = "",
-    val waUrl: String = ""
+    val waUrl: String = "",
+    val avatarUrl: String = "",
+    val email: String = "",
+    val instagram: String = ""
 )
 
-fun getAgentPhoneByName(meName: String): String {
-    val clean = meName.trim().lowercase()
-    return when {
-        clean.contains("dhavit") || clean.contains("dhavid") || clean.contains("david") || clean.contains("valentino") -> "08561103735"
-        clean.contains("syafruddin") || clean.contains("sfrd") || clean.contains("syafru") || clean.contains("udin") -> "08129525287"
-        clean.contains("raffa") || clean.contains("rafa") -> "08561103735"
-        clean.contains("yudhi") || clean.contains("yudi") -> "0811988978"
-        clean.contains("herry") || clean.contains("heri") -> "0811800100"
-        clean.contains("yusri") -> "08121088711"
-        clean.contains("tika") -> "08128765432"
-        clean.contains("siti") -> "081234567890"
-        clean.contains("dewi") -> "081388881234"
-        clean.contains("sari") -> "08129876543"
-        clean.contains("indah") -> "08151234567"
-        clean.contains("budi") -> "08128456789"
-        else -> ""
+data class AgentContact(
+    val nameKey: String,
+    val phone: String,
+    val email: String,
+    val instagram: String
+)
+
+val AGENT_CONTACT_LIST = listOf(
+    AgentContact("donny", "087877777677", "donny.raywhite@yahoo.com", "donny.raywhite"),
+    AgentContact("agung", "081808801688", "agung.rwcipete@gmail.com", "agungrwcipete"),
+    AgentContact("bayu", "081287222799", "bayu.raywhite@gmail.com", "bayu.raywhite"),
+    AgentContact("dian", "08161338093", "dians.raywhite@gmail.com", "south.jakarta.home"),
+    AgentContact("dini", "081282331997", "diniwiryandoko@gmail.com", "diniraywhitecipete"),
+    AgentContact("dutta", "081381564918", "duta.raywhite@gmail.com", "duttaraywhite"),
+    AgentContact("duta", "081381564918", "duta.raywhite@gmail.com", "duttaraywhite"),
+    AgentContact("ifa", "087885588897", "ifadebrianti.raywhite@gmail.com", "ifa.raywhite"),
+    AgentContact("ike", "081808361616", "ikejuliastuti@gmail.com", "raywhite_ike"),
+    AgentContact("ilham", "08561103735", "ilham.rwcipete@gmail.com", "ilhamsraywhite"),
+    AgentContact("imelda", "082177888816", "imelda.djuarta@yahoo.com", "raywhite_imelda_djuarta"),
+    AgentContact("iskandar", "08111823456", "iskandar.raywhite@gmail.com", "iskandar.raywhite"),
+    AgentContact("remmy", "081286960275", "michael.rwcipete@gmail.com", ""),
+    AgentContact("resmi", "081380620625", "resmi.raywhite@gmail.com", ""),
+    AgentContact("sam", "081298070006", "sam.rwcipete@gmail.com", "samsuperagent"),
+    AgentContact("santiaji", "085219698553", "ajisantiaji88@gmail.com", ""),
+    AgentContact("vincent", "081212892189", "vincent@raywhitecipete.net", "vincentbrata"),
+    AgentContact("yayan", "082114005670", "yayanhb2005@gmail.com", "yayanrahadiansyah"),
+    AgentContact("haryadi", "08111373777", "haryadi.raywhite@gmail.com", "Haryadi.raywhite"),
+    AgentContact("rony", "0811190046", "rony.raywhitecipete@gmail.com", ""),
+    AgentContact("indah", "082125120021", "indah.raywhitecipete@gmail.com", "indah.raywhite"),
+    AgentContact("dasep", "0818348046", "dasep.raywhite@gmail.com", "dasepraywhite"),
+    AgentContact("ruby", "085779153217", "ruby.raywhite@gmail.com", "ruby.raywhite"),
+    AgentContact("aii dyana", "081295951179", "aiidyana.raywhite@gmail.com", ""),
+    AgentContact("dyana", "081295951179", "aiidyana.raywhite@gmail.com", ""),
+    AgentContact("dedie", "082198909493", "dedie.rwc@gmail.com", "dedie.raywhite"),
+    AgentContact("ayu", "", "ayu.raywhite@gmail.com", ""),
+    AgentContact("dhenis", "08567773081", "dhenisemanuelraywhite@gmail.com", "dhenis.raywhite"),
+    AgentContact("zulkifli", "081230016702", "zulkifli.raywhite@gmail.com", "zulkifli_rwc"),
+    AgentContact("muljadi", "0811108308", "muljadi.raywhite@yahoo.com", ""),
+    AgentContact("andika", "081932899091", "tan.andika@gmail.com", "andika.rwc"),
+    AgentContact("mari", "08118087908", "marihariadi.raywhite@gmail.com", "mari.raywhite"),
+    AgentContact("amelia", "087784882233", "amelia.raywhitecipete@gmail.com", "aimeeworks.property"),
+    AgentContact("hilda", "0817216161", "hilda.raywhite@gmail.com", "hilda.raywhite"),
+    AgentContact("desy", "081284001033", "desy.raywhite@gmail.com", ""),
+    AgentContact("briand", "08176676276", "briandrwc@gmail.com", "briandproperty"),
+    AgentContact("rika", "081218280096", "rikaraywhite@yahoo.com", "rikaraywhite1"),
+    AgentContact("meisi", "0817855005", "meisiraywhite@gmail.com", "meisi.raywhite"),
+    AgentContact("yuma", "08118585137", "yumaray.raywhite@gmail.com", ""),
+    AgentContact("dhavit", "085169671344", "dhavitvalentino@gmail.com", "@dhavitvalentino"),
+    AgentContact("valentino", "085169671344", "dhavitvalentino@gmail.com", "@dhavitvalentino")
+)
+
+fun findContact(meName: String): AgentContact? {
+    val cleanName = meName.trim().lowercase()
+    if (cleanName.isBlank()) return null
+    return AGENT_CONTACT_LIST.find { contact ->
+        cleanName.contains(contact.nameKey) || contact.nameKey.contains(cleanName)
     }
+}
+
+fun getAgentPhoneByName(meName: String): String {
+    val contact = findContact(meName)
+    return contact?.phone ?: ""
+}
+
+fun getAgentEmailByName(meName: String): String {
+    val contact = findContact(meName)
+    return contact?.email ?: ""
+}
+
+fun getAgentInstagramByName(meName: String): String {
+    val contact = findContact(meName)
+    if (contact != null && contact.instagram.isNotBlank()) {
+        val ig = contact.instagram
+        return if (ig.startsWith("@")) ig else "@$ig"
+    }
+    return ""
+}
+
+fun cleanListingDescription(rawDesc: String): String {
+    val lines = rawDesc.split("\n")
+    var numLineIndex = -1
+    // Look at the top 8 lines for a line containing only digits
+    for (i in 0 until minOf(lines.size, 8)) {
+        val trimmedLine = lines[i].trim()
+        if (trimmedLine.isNotEmpty() && trimmedLine.matches("""\d+""".toRegex())) {
+            numLineIndex = i
+            break
+        }
+    }
+    if (numLineIndex != -1 && numLineIndex < lines.size - 1) {
+        // Drop the number line and everything above it, and only return lines below it!
+        return lines.drop(numLineIndex + 1).joinToString("\n").trim()
+    }
+    return rawDesc.trim()
 }
 
 class ScheduleViewModel(application: Application) : AndroidViewModel(application) {
@@ -109,6 +189,14 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
     private val _agentInfoMap = MutableStateFlow<Map<String, AgentInfo>>(emptyMap())
     val agentInfoMap: StateFlow<Map<String, AgentInfo>> = _agentInfoMap.asStateFlow()
 
+    // Cache for scraped listing price: idListing -> Price
+    private val _listingPriceMap = MutableStateFlow<Map<String, String>>(emptyMap())
+    val listingPriceMap: StateFlow<Map<String, String>> = _listingPriceMap.asStateFlow()
+
+    // Cache for scraped listing descriptions: idListing -> Description
+    private val _listingDescMap = MutableStateFlow<Map<String, String>>(emptyMap())
+    val listingDescMap: StateFlow<Map<String, String>> = _listingDescMap.asStateFlow()
+
     fun fetchListingImageIfNeeded(idListing: String, defaultMeName: String = "") {
         val cleanId = idListing.trim()
         if (cleanId.isBlank()) return
@@ -162,6 +250,21 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                             }
                         }
                         
+                        // Extract Agent Personal Photo from HTML (heuristic tags / paths containing agent, avatar, etc)
+                        var agentAvatarUrl = ""
+                        for (src in candidateUrls) {
+                            val lower = src.lowercase()
+                            if (lower.contains("agent") || lower.contains("avatar") || lower.contains("profile") || lower.contains("team") || lower.contains("member") || lower.contains("staff") || lower.contains("/me/")) {
+                                val fullUrl = if (src.startsWith("/")) {
+                                    "https://raywhitecipete.net" + src
+                                } else {
+                                    src
+                                }
+                                agentAvatarUrl = fullUrl
+                                break
+                            }
+                        }
+
                         // Parse WhatsApp / Agent Info
                         val waRegex = """(?:https?:)?//(?:api\.whatsapp\.com/send|wa\.me)/?[^\s"'>]*|whatsapp://[^\s"'>]*""".toRegex(RegexOption.IGNORE_CASE)
                         val waMatches = waRegex.findAll(html).map { it.value }.toList()
@@ -169,6 +272,10 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                         var finalAgentName = defaultMeName.trim()
                         var finalAgentPhone = getAgentPhoneByName(defaultMeName)
                         var finalWaUrl = ""
+                        
+                        var bestAgentName = defaultMeName.trim()
+                        var bestAgentPhone = ""
+                        var bestWaUrl = ""
                         
                         for (waUrl in waMatches) {
                             val decoded = try { java.net.URLDecoder.decode(waUrl, "UTF-8") } catch(e: Exception) { waUrl }
@@ -192,21 +299,42 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                                 }
                             }
                             
+                            // Check if phone matches the default office admin digits
+                            val digitsOnly = phone.replace("+", "").removePrefix("62").removePrefix("0")
+                            val isOfficeAdminLine = digitsOnly == "85169671344"
+                            
                             // Extract Name
                             var name = ""
                             val hubungiMatch = """Hubungi:[ \n\r]*([A-Za-z ]+)[, \n\r]""".toRegex(RegexOption.IGNORE_CASE).find(decoded)
                             if (hubungiMatch != null) {
                                 name = hubungiMatch.groupValues[1].trim()
+                            } else {
+                                val hubungiNoColon = """Hubungi\s+([A-Za-z ]+)""".toRegex(RegexOption.IGNORE_CASE).find(decoded)
+                                if (hubungiNoColon != null) {
+                                    name = hubungiNoColon.groupValues[1].trim()
+                                }
                             }
                             
                             if (phone.isNotBlank()) {
-                                finalAgentPhone = phone
-                                if (name.isNotBlank()) {
-                                    finalAgentName = name
+                                // Prioritize the personal agent number over the floating office support number
+                                if (bestAgentPhone.isBlank() || (!isOfficeAdminLine && bestAgentPhone.replace("+", "").removePrefix("62").removePrefix("0") == "85169671344")) {
+                                    bestAgentPhone = phone
+                                    if (name.isNotBlank()) {
+                                        bestAgentName = name
+                                    }
+                                    bestWaUrl = waUrl
+                                    // If we found a personal number (non-office), we can stop
+                                    if (!isOfficeAdminLine) {
+                                        break
+                                    }
                                 }
-                                finalWaUrl = waUrl
-                                break
                             }
+                        }
+                        
+                        if (bestAgentPhone.isNotBlank()) {
+                            finalAgentPhone = bestAgentPhone
+                            finalAgentName = bestAgentName
+                            finalWaUrl = bestWaUrl
                         }
                         
                         // Text heuristics search/fallback for phone and name if no explicit Wa link worked
@@ -238,6 +366,75 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                             finalAgentPhone = getAgentPhoneByName(finalAgentName)
                         }
                         
+                        // Parse Price & Description
+                        var parsedPrice = ""
+                        val markupPriceRegex = """<h\d[^>]*>(Rp[^<]+)</h\d>""".toRegex(RegexOption.IGNORE_CASE)
+                        val markupMatch = markupPriceRegex.find(html)
+                        if (markupMatch != null) {
+                            parsedPrice = markupMatch.groupValues[1].trim()
+                        }
+                        if (parsedPrice.isBlank()) {
+                            val priceRegex = """Rp\.?\s*([0-9\.,]+(?:\s*(?:Milyar|M|Juta|J))?)""".toRegex(RegexOption.IGNORE_CASE)
+                            val priceMatches = priceRegex.findAll(html)
+                            for (m in priceMatches) {
+                                val candidate = m.value.trim()
+                                if (candidate.length > 5 && candidate.length < 30) {
+                                    parsedPrice = candidate
+                                    break
+                                }
+                            }
+                        }
+                        if (parsedPrice.isBlank()) {
+                            parsedPrice = "Hubungi Agent"
+                        }
+
+                        var parsedDesc = ""
+                        val descDivRegex = """<div[^>]+(?:class|id)=["']([^"']*(?:desc|content|detail)[^"']*)["'][^>]*>([\s\S]*?)</div>""".toRegex(RegexOption.IGNORE_CASE)
+                        val descMatches = descDivRegex.findAll(html)
+                        var longestText = ""
+                        for (match in descMatches) {
+                            val classOrId = match.groupValues[1].lowercase()
+                            if (classOrId.contains("header") || classOrId.contains("nav") || classOrId.contains("footer") || classOrId.contains("menu")) continue
+                            val innerHtml = match.groupValues[2]
+                            val cleanTxt = innerHtml.replace("<[^>]*>".toRegex(), " ")
+                                                    .replace("&nbsp;".toRegex(), " ")
+                                                    .replace("""\s+""".toRegex(), " ")
+                                                    .trim()
+                            if (cleanTxt.length > longestText.length && cleanTxt.length < 5000) {
+                                if (cleanTxt.lowercase().contains("luas") || cleanTxt.lowercase().contains("kamar") || cleanTxt.lowercase().contains("tanah") || cleanTxt.lowercase().contains("mandi") || cleanTxt.lowercase().contains("house")) {
+                                    longestText = cleanTxt
+                                } else if (longestText.isEmpty() || !longestText.lowercase().contains("luas")) {
+                                    longestText = cleanTxt
+                                }
+                            }
+                        }
+                        if (longestText.length > 30) {
+                            parsedDesc = longestText
+                        } else {
+                            val pRegex = """<p[^>]*>([\s\S]*?)</p>""".toRegex(RegexOption.IGNORE_CASE)
+                            val pMatches = pRegex.findAll(html)
+                            val pList = mutableListOf<String>()
+                            for (pm in pMatches) {
+                                val txt = pm.groupValues[1].replace("<[^>]*>".toRegex(), " ").replace("&nbsp;".toRegex(), " ").trim()
+                                if (txt.length > 20 && !txt.contains("Copyright", ignoreCase = true) && !txt.contains("Ray White", ignoreCase = true)) {
+                                    pList.add(txt)
+                                }
+                            }
+                            if (pList.isNotEmpty()) {
+                                parsedDesc = pList.joinToString("\n\n")
+                            }
+                        }
+                        if (parsedDesc.isBlank()) {
+                            parsedDesc = "Deskripsi tidak tersedia di websiteListing. Silakan hubungi agent terkait."
+                        }
+
+                        _listingPriceMap.update { current ->
+                            current + (cleanId to parsedPrice)
+                        }
+                        _listingDescMap.update { current ->
+                            current + (cleanId to cleanListingDescription(parsedDesc))
+                        }
+
                         // Update cache with results
                         if (allImages.isNotEmpty()) {
                             _listingImagesMap.update { current ->
@@ -250,8 +447,11 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                         
                         val agentInfo = AgentInfo(
                             name = finalAgentName,
-                            phone = finalAgentPhone,
-                            waUrl = finalWaUrl
+                            phone = getAgentPhoneByName(finalAgentName),
+                            waUrl = finalWaUrl,
+                            avatarUrl = agentAvatarUrl,
+                            email = getAgentEmailByName(finalAgentName),
+                            instagram = getAgentInstagramByName(finalAgentName)
                         )
                         _agentInfoMap.update { current ->
                             current + (cleanId to agentInfo)
@@ -282,6 +482,7 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
 
     // Database entries
     val allSchedules: StateFlow<List<Schedule>> = repository.allSchedules
+        .map { list -> list.filter { it.idListing.trim() != "VERSION_CHECK" } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Filtered schedules for dashboard using combined Flows
@@ -381,10 +582,9 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun updateScheduleDirectly(schedule: Schedule) {
+    fun updateScheduleDirectly(schedule: Schedule, original: Schedule) {
         viewModelScope.launch {
             _syncStatus.value = SyncState.Loading
-            val original = schedule
             val result = repository.updateSchedule(schedule, original)
             result.onSuccess {
                 _syncStatus.value = SyncState.Success("Jadwal Berhasil Diperbarui!")

@@ -39,7 +39,7 @@ enum class TabItem(
     DASHBOARD("Dashboard", Icons.Filled.Dashboard, Icons.Outlined.Dashboard, "tab_dashboard"),
     ANALYTIC("Analytic", Icons.Filled.PieChart, Icons.Outlined.PieChart, "tab_analytic"),
     TAMBAH("Tambah", Icons.Filled.AddCircle, Icons.Outlined.AddCircle, "tab_tambah"),
-    PENGATURAN("Pengaturan", Icons.Filled.Settings, Icons.Outlined.Settings, "tab_settings")
+    PENGATURAN("Setting", Icons.Filled.Settings, Icons.Outlined.Settings, "tab_settings")
 }
 
 class MainActivity : ComponentActivity() {
@@ -130,7 +130,7 @@ class MainActivity : ComponentActivity() {
                             )
                             NavigationDrawerItem(
                                 icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                label = { Text("Pengaturan API Sheets") },
+                                label = { Text("Setting API Sheets") },
                                 selected = currentTab == TabItem.PENGATURAN,
                                 onClick = {
                                     currentTab = TabItem.PENGATURAN
@@ -255,6 +255,7 @@ class MainActivity : ComponentActivity() {
                                     )
                                     TabItem.ANALYTIC -> AnalyticScreen(
                                         viewModel = viewmodel,
+                                        onNavigateBack = { currentTab = TabItem.DASHBOARD },
                                         modifier = contentModifier
                                     )
                                     TabItem.TAMBAH -> InputFormScreen(
@@ -264,6 +265,7 @@ class MainActivity : ComponentActivity() {
                                     )
                                     TabItem.PENGATURAN -> SettingsScreen(
                                         viewModel = viewmodel,
+                                        onNavigateBack = { currentTab = TabItem.DASHBOARD },
                                         modifier = contentModifier
                                     )
                                 }

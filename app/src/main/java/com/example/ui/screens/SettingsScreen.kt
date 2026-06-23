@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,6 +37,7 @@ import com.example.ui.ScheduleViewModel
 @Composable
 fun SettingsScreen(
     viewModel: ScheduleViewModel,
+    onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -362,9 +364,17 @@ function doPost(e) {
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "Pengaturan",
+                            text = "Setting",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Kembali ke Dashboard"
                         )
                     }
                 },
@@ -433,7 +443,7 @@ function doPost(e) {
                             )
 
                             Text(
-                                text = "Hanya boleh diakses oleh developer:\nDhavid Febrian Valentino",
+                                text = "Hanya dapat diakses oleh developer:\nDhavid Febrian Valentino",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -484,7 +494,7 @@ function doPost(e) {
                             ) {
                                 Icon(Icons.Default.VpnKey, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Buka Akses Pengaturan", fontWeight = FontWeight.Bold)
+                                Text("Buka Akses Setting", fontWeight = FontWeight.Bold)
                             }
 
                             Divider(modifier = Modifier.padding(vertical = 4.dp))

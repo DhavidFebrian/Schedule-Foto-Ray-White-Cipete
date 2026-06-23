@@ -24,7 +24,14 @@ interface ScheduleDao {
             insertSchedules(newSchedules)
         }
         if (unsyncedSchedules.isNotEmpty()) {
-            insertSchedules(unsyncedSchedules)
+            val newUniqueKeys = newSchedules.map { "${it.idListing.trim()}_${it.namaMe.trim()}_${it.tanggal.trim()}_${it.jam.trim()}" }.toSet()
+            val filteredUnsynced = unsyncedSchedules.filter {
+                val key = "${it.idListing.trim()}_${it.namaMe.trim()}_${it.tanggal.trim()}_${it.jam.trim()}"
+                !newUniqueKeys.contains(key)
+            }
+            if (filteredUnsynced.isNotEmpty()) {
+                insertSchedules(filteredUnsynced)
+            }
         }
     }
 
